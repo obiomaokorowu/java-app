@@ -1,0 +1,59 @@
+name: Build & Deploy Java App to EC2 via DockerHub
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE_NAME: java-app
+  DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/java-app
+
+jobs:
+  build-and-push:
+    name: Build Java App & Push to DockerHub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Maven
+        run: sudo apt-get install -y maven
+
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t $DOCKERHUB_REPO .
+          docker push $DOCKERHUB_REPO
+
+  deploy-to-ec2:
+    name: Deploy Java Docker to EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: SSH and Deploy to EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_PUBLIC_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            echo "Pulling and running Java app container on port 8080..."
+            docker rm -f java-app || true
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/java-app
+            docker run -d --name java -p 8080:8080 ${{ secrets.DOCKERHUB_USERNAME }}/java-app
